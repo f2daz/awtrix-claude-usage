@@ -1,0 +1,118 @@
+# @name    Claude Usage
+# @desc    Unofficial: your Claude plan limits (5-hour and weekly window) live on the clock, with the Claude mascot getting nervous as you approach the limit. Values arrive over MQTT from a small Claude Code status line script: github.com/f2daz/awtrix-claude-usage. Works with Pro/Max; tested with a Team plan. Not affiliated with Anthropic.
+# @author  f2daz
+# @version 1.0
+# @display 52x16
+# @icons   claude-mascot-ok-claude-usage, claude-mascot-warning-claude-usa, claude-mascot-alert-claude-usage, claude-mascot-knocked-out-claude
+# @config  topic text   "MQTT topic"        default="claude-code/usage" maxlen=120 help="Retained JSON with five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at"
+# @config  warn  number "Warning from"      default=70 min=10 max=100 unit=% help="Orange values and a worried mascot from here"
+# @config  alert number "Alert from"        default=90 min=10 max=100 unit=% help="Red values and an alarmed mascot from here"
+# @config  stale number "Old after"         default=30 min=5 max=240 unit=min help="A dark red frame marks the values when nothing arrived for this long"
+# @config  reset bool   "Show reset time"   default=true help="Alternates every 4 s between the percentage and the time until the window resets"
+# @config  hide  bool   "Hide without data" default=true help="Skip the app in the rotation until the first values arrived"
+#
+# Expected payload (retained), e.g. published by the Claude Code status line:
+#   {"five_hour_pct":11.0,"five_hour_resets_at":1791453000,"seven_day_pct":41.0,"seven_day_resets_at":1791756000}
+# Percentages 0..100 (or null when a window is not active), reset times in Unix seconds.
+import json
+
+class ClaudeUsage
+  var five, seven, five_at, seven_at, rx
+  var l5, l7, c5, c7, w5, w7, top, old
+
+  def init()
+    self.five = nil self.seven = nil self.five_at = nil self.seven_at = nil
+    self.rx = nil
+    self.l5 = "--" self.l7 = "--"
+    self.c5 = 0x888888 self.c7 = 0x888888
+    self.w5 = 0 self.w7 = 0
+    self.top = 0.0
+    self.old = false
+  end
+
+  def setup()
+    var t = store.get("topic")
+    if t == nil || t == "" t = "claude-code/usage" end
+    mqtt.subscribe(t, / topic, payload -> self.on_msg(payload))
+  end
+
+  def on_msg(payload)
+    var d = json.load(payload)
+    if !isinstance(d, map) return end
+    self.five = d.find("five_hour_pct")
+    self.seven = d.find("seven_day_pct")
+    self.five_at = d.find("five_hour_resets_at")
+    self.seven_at = d.find("seven_day_resets_at")
+    self.rx = now_ms()
+    self.build()
+  end
+
+  def colour(p)
+    if p == nil return 0x888888 end
+    if p >= num(store.get("alert"), 90) return 0xFF3020 end
+    if p >= num(store.get("warn"), 70) return 0xFFA020 end
+    return 0x30D050
+  end
+
+  # Time until a window resets: "2:15" below a day, "87H" above (a "D" reads like "0" in the small font)
+  def left(at)
+    var now = epoch_ms()
+    if at == nil || now <= 0 return nil end
+    var s = int(at) - now / 1000
+    if s < 0 s = 0 end
+    if s >= 86400 return format("%dH", (s + 1800) / 3600) end
+    return format("%d:%02d", s / 3600, (s % 3600) / 60)
+  end
+
+  def build()
+    var show_reset = store.get("reset") != false && (now_ms() / 4000) % 2 == 1
+    var a = show_reset ? self.left(self.five_at) : nil
+    var b = show_reset ? self.left(self.seven_at) : nil
+    self.l5 = self.five == nil ? "--" : (a != nil ? a : format("%d%%", int(self.five + 0.5)))
+    self.l7 = self.seven == nil ? "--" : (b != nil ? b : format("%d%%", int(self.seven + 0.5)))
+    self.c5 = self.colour(self.five)
+    self.c7 = self.colour(self.seven)
+    self.w5 = self.five == nil ? 0 : clamp(int(self.five * 29 / 100 + 0.5), 0, 29)
+    self.w7 = self.seven == nil ? 0 : clamp(int(self.seven * 29 / 100 + 0.5), 0, 29)
+    var m = 0.0
+    if self.five != nil && self.five > m m = self.five end
+    if self.seven != nil && self.seven > m m = self.seven end
+    self.top = m
+    self.old = self.rx != nil && now_ms() - self.rx > num(store.get("stale"), 30) * 60000
+  end
+
+  def loop()
+    if self.rx != nil self.build() end
+  end
+
+  def should_show()
+    return !(store.get("hide") != false && self.rx == nil)
+  end
+
+  def mascot()
+    var a = num(store.get("alert"), 90), w = num(store.get("warn"), 70)
+    if self.top >= 100 return "claude-mascot-knocked-out-claude" end
+    if self.top >= a return "claude-mascot-alert-claude-usage" end
+    if self.top >= w return "claude-mascot-warning-claude-usa" end
+    return "claude-mascot-ok-claude-usage"
+  end
+
+  def draw()
+    clear()
+    if !icon(self.mascot(), 0, 0)
+      rect_fill(4, 3, 14, 9, 0xD97757)          # placeholder when the icon is missing
+    end
+    font("small")
+    var x = 23 + text(23, 6, "5H ", 0xD97757)    # text() returns the width it used
+    text(x, 6, self.l5, self.c5)
+    x = 23 + text(23, 14, "7D ", 0xD97757)
+    text(x, 14, self.l7, self.c7)
+    rect_fill(23, 7, 29, 1, 0x202020)
+    rect_fill(23, 15, 29, 1, 0x202020)
+    if self.w5 > 0 rect_fill(23, 7, self.w5, 1, self.c5) end
+    if self.w7 > 0 rect_fill(23, 15, self.w7, 1, self.c7) end
+    if self.old rect(0, 0, 52, 16, 0x6E0700) end
+  end
+end
+
+return ClaudeUsage()

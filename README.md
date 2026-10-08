@@ -1,0 +1,90 @@
+# Claude Usage for AWTRIX NG (Ulanzi TC002)
+
+Unofficial. Shows your Claude plan limits on a 52×16 AWTRIX NG clock: the rolling
+**5-hour** and **weekly** window, with the Claude mascot getting nervous as you approach a
+limit. Every 4 seconds the values alternate with the time until the window resets.
+
+| Usage | Time until reset |
+|---|---|
+| ![percent](images/percent.png) | ![reset](images/reset.png) |
+
+Two parts:
+
+| Part | Runs on | File |
+|---|---|---|
+| AWTRIX script “Claude Usage” | the clock | `claude-usage.ax` (AWTRIX Hub) |
+| Status line sender | your computer, inside Claude Code | `claude_usage_mqtt.py` |
+
+The clock never talks to Anthropic. Claude Code already hands the limits to its status
+line command; the sender publishes them as a retained MQTT message, the script subscribes.
+No API key, no extra requests.
+
+## Requirements
+
+- Claude Code with a claude.ai subscription. Claude Code documents the `rate_limits`
+  status line field for **Pro and Max**; it also works with a **Team** plan (tested), but
+  that is not documented and may change. The limits are only present after the first
+  response of a session, and only while Claude Code runs somewhere.
+- An MQTT broker that both your computer and the clock can reach; MQTT set up on the clock
+  (System → MQTT).
+- `mosquitto_pub` on the computer (`brew install mosquitto`, `apt install mosquitto-clients`).
+
+## 1. The sender
+
+```bash
+cp claude_usage_mqtt.py ~/.claude/ && chmod +x ~/.claude/claude_usage_mqtt.py
+cat > ~/.config/claude-usage-mqtt.env <<'EOF'
+MQTT_HOST=192.168.1.10
+MQTT_PORT=1883
+MQTT_USER=
+MQTT_PASS=
+STATE_TOPIC=claude-code/usage
+# 1 = also create Home Assistant sensors via MQTT discovery
+HA_DISCOVERY=0
+EOF
+chmod 600 ~/.config/claude-usage-mqtt.env
+```
+
+`~/.claude/settings.json`:
+
+```json
+"statusLine": { "type": "command", "command": "~/.claude/claude_usage_mqtt.py" }
+```
+
+The status line then reads `[Opus] 5h: 13% | 7d: 41%`. Check the broker:
+`mosquitto_sub -h <broker> -t claude-code/usage -v`.
+
+macOS: if publishing fails with “No route to host” for a broker in your own subnet, allow
+your terminal under *System Settings → Privacy & Security → Local Network*.
+
+## 2. The script
+
+Install “Claude Usage” from the [AWTRIX Hub](https://awtrix.de) (the four mascot icons come along), or paste
+`claude-usage.ax` in the web UI under Scripts. Settings:
+
+| Setting | Default | |
+|---|---|---|
+| MQTT topic | `claude-code/usage` | must match `STATE_TOPIC` |
+| Warning from | 70 % | orange, worried mascot |
+| Alert from | 90 % | red, alarmed mascot (100 %: knocked out) |
+| Old after | 30 min | dark red frame when nothing arrived |
+| Show reset time | on | `3:11` below a day, `87H` above |
+| Hide without data | on | skip the app until the first message |
+
+## Payload
+
+```json
+{"five_hour_pct": 13.0, "five_hour_resets_at": 1791453000,
+ "seven_day_pct": 41.0, "seven_day_resets_at": 1791756000, "updated_at": 1791441318}
+```
+
+Percentages 0–100 or `null` when a window is not active; times in Unix seconds. Anything
+that publishes this shape works, the sender is just one way.
+
+## Credits and license
+
+Mascot icons: the “Claude Usage” icon set by another author on the AWTRIX Hub, installed
+from the Hub via `@icons`. This project is unofficial and not affiliated with or endorsed by
+Anthropic; “Claude” is a trademark of Anthropic.
+
+Script and sender: MIT License, see [LICENSE](LICENSE).
