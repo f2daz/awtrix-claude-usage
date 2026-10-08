@@ -1,7 +1,7 @@
 # @name    Claude Usage
 # @desc    Unofficial: your Claude plan limits (5-hour and weekly window) live on the clock, with the Claude mascot getting nervous as you approach the limit. Values arrive over MQTT from a small Claude Code status line script: github.com/f2daz/awtrix-claude-usage. Works with Pro/Max; tested with a Team plan. Not affiliated with Anthropic.
 # @author  f2daz
-# @version 1.0
+# @version 1.1
 # @display 52x16
 # @icons   claude-mascot-ok-claude-usage, claude-mascot-warning-claude-usa, claude-mascot-alert-claude-usage, claude-mascot-knocked-out-claude
 # @config  topic text   "MQTT topic"        default="claude-code/usage" maxlen=120 help="Retained JSON with five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at"
@@ -10,6 +10,13 @@
 # @config  stale number "Old after"         default=30 min=5 max=240 unit=min help="A dark red frame marks the values when nothing arrived for this long"
 # @config  reset bool   "Show reset time"   default=true help="Alternates every 4 s between the percentage and the time until the window resets"
 # @config  hide  bool   "Hide without data" default=true help="Skip the app in the rotation until the first values arrived"
+# @config  notify bool  "Notifications"     default=true help="A notification with the mascot when a window crosses the warning or alert level, or runs out"
+# @config  sound bool   "Notification sound" default=false
+# @config  snd1  text   "Warning melody"    default="" maxlen=24 help="Name of a stored melody; empty = built-in"
+# @config  snd2  text   "Alert melody"      default="" maxlen=24 help="Name of a stored melody; empty = built-in"
+# @config  snd3  text   "Used up melody"    default="" maxlen=24 help="Name of a stored melody; empty = built-in"
+# @config  qfrom number "Quiet from"        default=22 min=0 max=23 help="Hour; no sound from here"
+# @config  qto   number "Quiet until"       default=7  min=0 max=23
 #
 # Expected payload (retained), e.g. published by the Claude Code status line:
 #   {"five_hour_pct":11.0,"five_hour_resets_at":1791453000,"seven_day_pct":41.0,"seven_day_resets_at":1791756000}
@@ -45,6 +52,45 @@ class ClaudeUsage
     self.seven_at = d.find("seven_day_resets_at")
     self.rx = now_ms()
     self.build()
+    self.check("5H", self.five, "lv5")
+    self.check("7D", self.seven, "lv7")
+  end
+
+  # Level per window: 0 normal, 1 warning, 2 alert, 3 used up. Rising crossings notify once;
+  # the level drops again below warning - 5 (e.g. after a reset). Kept in the store, so a
+  # restart or the first message after installing never notifies.
+  def check(label, p, key)
+    if p == nil return end
+    var w = num(store.get("warn"), 70), a = num(store.get("alert"), 90)
+    var prev = store.get(key), lvl = prev == nil ? 0 : prev
+    var now_lvl = p >= 100 ? 3 : (p >= a ? 2 : (p >= w ? 1 : 0))
+    if now_lvl > lvl lvl = now_lvl
+    elif p < w - 5 lvl = 0
+    end
+    if prev != nil && lvl > prev && store.get("notify") != false self.tell(label, p, lvl) end
+    if lvl != prev store.set(key, lvl) end
+  end
+
+  def quiet()
+    var h = hour(), a = num(store.get("qfrom"), 22), b = num(store.get("qto"), 7)
+    if h < 0 || a == b return false end
+    return a < b ? (h >= a && h < b) : (h >= a || h < b)
+  end
+
+  def tell(label, p, lvl)
+    var icons = ["", "claude-mascot-warning-claude-usa", "claude-mascot-alert-claude-usage", "claude-mascot-knocked-out-claude"]
+    var colour = lvl == 1 ? 0xFFA020 : 0xFF3020
+    var n = {"name": "claude-usage", "durationMs": 10000,
+             "layout": {"version": 1, "regions": [
+               {"id": "i", "box": [0, 0, 22, 16], "icon": icons[lvl]},
+               {"id": "a", "box": [23, 0, 29, 8], "text": "CLAUDE", "color": 0xD97757},
+               {"id": "b", "box": [23, 8, 29, 8], "text": label + format(" %d%%", int(p + 0.5)), "color": colour}]}}
+    if store.get("sound") == true && !self.quiet()
+      var own = store.get(["", "snd1", "snd2", "snd3"][lvl])
+      var builtin = ["", "warn:d=8,o=5,b=160:e,g,p,e,g", "alert:d=16,o=6,b=200:a,p,a,p,a,8p,a,p,a,p,a", "out:d=8,o=5,b=100:g,f#,f,2e"]
+      n["sound"] = (own != nil && own != "") ? own : {"rtttl": builtin[lvl]}
+    end
+    if !notify(n) log("notification refused") end
   end
 
   def colour(p)

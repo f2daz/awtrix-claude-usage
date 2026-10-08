@@ -70,6 +70,9 @@ Install “Claude Usage” from the [AWTRIX Hub](https://awtrix.de) (the four ma
 | Old after | 30 min | dark red frame when nothing arrived |
 | Show reset time | on | `3:11` below a day, `87H` above |
 | Hide without data | on | skip the app until the first message |
+| Notifications | on | mascot + “CLAUDE 5H 92%” when a window crosses the warning or alert level or reaches 100 % (once per crossing) |
+| Notification sound | off | built-in melodies, or the name of a melody stored on the clock |
+| Quiet from / until | 22 / 7 | no sound in these hours |
 
 ## Payload
 
