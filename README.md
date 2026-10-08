@@ -14,6 +14,7 @@ Two parts:
 |---|---|---|
 | AWTRIX script “Claude Usage” | the clock | `claude-usage.ax` (AWTRIX Hub) |
 | Status line sender | your computer, inside Claude Code | `claude_usage_mqtt.py` |
+| Done / waiting hook (optional) | your computer, inside Claude Code | `claude_event_mqtt.py` |
 
 The clock never talks to Anthropic. Claude Code already hands the limits to its status
 line command; the sender publishes them as a retained MQTT message, the script subscribes.
@@ -73,6 +74,35 @@ Install “Claude Usage” from the [AWTRIX Hub](https://awtrix.de) (the four ma
 | Notifications | on | mascot + “CLAUDE 5H 92%” when a window crosses the warning or alert level or reaches 100 % (once per crossing) |
 | Notification sound | off | built-in melodies, or the name of a melody stored on the clock |
 | Quiet from / until | 22 / 7 | no sound in these hours |
+
+## 3. Optional: “done” and “waiting” on the clock
+
+A Claude Code hook tells the clock when Claude finished a longer task or waits for your
+input (a permission or a question), so you can look away during long runs.
+
+| Done | Waiting |
+|---|---|
+| mascot + “FERTIG” + project, green | mascot + “WARTET” + project, orange |
+
+```bash
+cp claude_event_mqtt.py ~/.claude/ && chmod +x ~/.claude/claude_event_mqtt.py
+```
+
+Add to `~/.claude/settings.json` (same env file as the sender; optional keys
+`EVENT_TOPIC=claude-code/event`, `MIN_SECONDS=60`):
+
+```json
+"hooks": {
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "~/.claude/claude_event_mqtt.py", "async": true}]}],
+  "Stop":             [{"hooks": [{"type": "command", "command": "~/.claude/claude_event_mqtt.py", "async": true}]}],
+  "Notification":     [{"hooks": [{"type": "command", "command": "~/.claude/claude_event_mqtt.py", "async": true}]}]
+}
+```
+
+“Done” is only sent when the turn took at least `MIN_SECONDS`, so quick answers stay quiet.
+Subagents are ignored. Messages are not retained; the script drops anything older than two
+minutes. Settings on the clock: *Done / waiting*, *Event topic*, *Done melody*,
+*Waiting melody* (sound and quiet hours as above).
 
 ## Payload
 

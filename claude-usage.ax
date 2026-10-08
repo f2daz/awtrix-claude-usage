@@ -1,7 +1,7 @@
 # @name    Claude Usage
 # @desc    Unofficial: your Claude plan limits (5-hour and weekly window) live on the clock, with the Claude mascot getting nervous as you approach the limit. Values arrive over MQTT from a small Claude Code status line script: github.com/f2daz/awtrix-claude-usage. Works with Pro/Max; tested with a Team plan. Not affiliated with Anthropic.
 # @author  f2daz
-# @version 1.1
+# @version 1.2
 # @display 52x16
 # @icons   claude-mascot-ok-claude-usage, claude-mascot-warning-claude-usa, claude-mascot-alert-claude-usage, claude-mascot-knocked-out-claude
 # @config  topic text   "MQTT topic"        default="claude-code/usage" maxlen=120 help="Retained JSON with five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at"
@@ -17,6 +17,10 @@
 # @config  snd3  text   "Used up melody"    default="" maxlen=24 help="Name of a stored melody; empty = built-in"
 # @config  qfrom number "Quiet from"        default=22 min=0 max=23 help="Hour; no sound from here"
 # @config  qto   number "Quiet until"       default=7  min=0 max=23
+# @config  events bool  "Done / waiting"    default=true help="Notification when Claude finished a longer task or waits for your input (hook claude_event_mqtt.py)"
+# @config  evtopic text "Event topic"       default="claude-code/event" maxlen=120
+# @config  snddone text "Done melody"       default="" maxlen=24 help="Name of a stored melody; empty = built-in"
+# @config  sndask text  "Waiting melody"    default="" maxlen=24 help="Name of a stored melody; empty = built-in"
 #
 # Expected payload (retained), e.g. published by the Claude Code status line:
 #   {"five_hour_pct":11.0,"five_hour_resets_at":1791453000,"seven_day_pct":41.0,"seven_day_resets_at":1791756000}
@@ -41,6 +45,40 @@ class ClaudeUsage
     var t = store.get("topic")
     if t == nil || t == "" t = "claude-code/usage" end
     mqtt.subscribe(t, / topic, payload -> self.on_msg(payload))
+    var e = store.get("evtopic")
+    if e == nil || e == "" e = "claude-code/event" end
+    mqtt.subscribe(e, / topic, payload -> self.on_event(payload))
+  end
+
+  # {"event":"done","project":"x","secs":312} or {"event":"input","project":"x"} from the hook
+  def on_event(payload)
+    if store.get("events") == false return end
+    var d = json.load(payload)
+    if !isinstance(d, map) return end
+    var ev = d.find("event"), at = d.find("at"), now = epoch_ms()
+    if at != nil && now > 0 && now / 1000 - int(at) > 120 return end   # late delivery, skip
+    var proj = d.find("project")
+    proj = proj == nil ? "" : str(proj)
+    if size(proj) > 20 proj = proj[0 .. 19] end
+    var title, colour, icn, own, rtttl
+    if ev == "done"
+      title = "FERTIG" colour = 0x30D050 icn = "claude-mascot-ok-claude-usage"
+      own = store.get("snddone") rtttl = "done:d=16,o=6,b=180:c,e,g,4c7"
+    elif ev == "input"
+      title = "WARTET" colour = 0xFFA020 icn = "claude-mascot-warning-claude-usa"
+      own = store.get("sndask") rtttl = "ask:d=8,o=6,b=200:e,p,e"
+    else
+      return
+    end
+    var n = {"name": "claude-event", "durationMs": 10000,
+             "layout": {"version": 1, "regions": [
+               {"id": "i", "box": [0, 0, 22, 16], "icon": icn},
+               {"id": "a", "box": [23, 0, 29, 8], "text": title, "color": colour},
+               {"id": "b", "box": [23, 8, 29, 8], "text": proj == "" ? "CLAUDE" : proj, "color": 0xD97757}]}}
+    if store.get("sound") == true && !self.quiet()
+      n["sound"] = (own != nil && own != "") ? own : {"rtttl": rtttl}
+    end
+    if !notify(n) log("notification refused") end
   end
 
   def on_msg(payload)
