@@ -82,7 +82,7 @@ input (a permission or a question), so you can look away during long runs.
 
 | Done | Waiting |
 |---|---|
-| mascot + “FERTIG” + project, green | mascot + “WARTET” + project, orange |
+| mascot + “DONE” + project, green | mascot + “WAITING” + project, orange |
 
 ```bash
 cp claude_event_mqtt.py ~/.claude/ && chmod +x ~/.claude/claude_event_mqtt.py
@@ -101,8 +101,9 @@ Add to `~/.claude/settings.json` (same env file as the sender; optional keys
 
 “Done” is only sent when the turn took at least `MIN_SECONDS`, so quick answers stay quiet.
 Subagents are ignored. Messages are not retained; the script drops anything older than two
-minutes. Settings on the clock: *Done / waiting*, *Event topic*, *Done melody*,
-*Waiting melody* (sound and quiet hours as above).
+minutes. Settings on the clock: *Done / waiting*, *Event topic*, *Done text*, *Waiting text*
+(up to 8 characters, e.g. in your language), *Done melody*, *Waiting melody* (sound and quiet
+hours as above).
 
 ## Payload
 

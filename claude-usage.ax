@@ -1,7 +1,7 @@
 # @name    Claude Usage
-# @desc    Unofficial: your Claude plan limits (5-hour and weekly window) live on the clock, with the Claude mascot getting nervous as you approach the limit. Values arrive over MQTT from a small Claude Code status line script: github.com/f2daz/awtrix-claude-usage. Works with Pro/Max; tested with a Team plan. Not affiliated with Anthropic.
+# @desc    Unofficial: your Claude plan limits (5-hour and weekly window) live on the clock, with the Claude mascot getting nervous as you approach the limit. Optional: a notification when Claude Code finished a longer task or waits for your input. Values arrive over MQTT from a small status line script and hook: github.com/f2daz/awtrix-claude-usage. Works with Pro/Max; tested with a Team plan. Not affiliated with Anthropic.
 # @author  f2daz
-# @version 1.2
+# @version 1.3
 # @display 52x16
 # @icons   claude-mascot-ok-claude-usage, claude-mascot-warning-claude-usa, claude-mascot-alert-claude-usage, claude-mascot-knocked-out-claude
 # @config  topic text   "MQTT topic"        default="claude-code/usage" maxlen=120 help="Retained JSON with five_hour_pct, seven_day_pct, five_hour_resets_at, seven_day_resets_at"
@@ -19,6 +19,8 @@
 # @config  qto   number "Quiet until"       default=7  min=0 max=23
 # @config  events bool  "Done / waiting"    default=true help="Notification when Claude finished a longer task or waits for your input (hook claude_event_mqtt.py)"
 # @config  evtopic text "Event topic"       default="claude-code/event" maxlen=120
+# @config  txtdone text "Done text"         default="DONE" maxlen=8
+# @config  txtask text  "Waiting text"      default="WAITING" maxlen=8
 # @config  snddone text "Done melody"       default="" maxlen=24 help="Name of a stored melody; empty = built-in"
 # @config  sndask text  "Waiting melody"    default="" maxlen=24 help="Name of a stored melody; empty = built-in"
 #
@@ -50,6 +52,11 @@ class ClaudeUsage
     mqtt.subscribe(e, / topic, payload -> self.on_event(payload))
   end
 
+  def word(key, fallback)
+    var w = store.get(key)
+    return (w == nil || w == "") ? fallback : w
+  end
+
   # {"event":"done","project":"x","secs":312} or {"event":"input","project":"x"} from the hook
   def on_event(payload)
     if store.get("events") == false return end
@@ -62,10 +69,10 @@ class ClaudeUsage
     if size(proj) > 20 proj = proj[0 .. 19] end
     var title, colour, icn, own, rtttl
     if ev == "done"
-      title = "FERTIG" colour = 0x30D050 icn = "claude-mascot-ok-claude-usage"
+      title = self.word("txtdone", "DONE") colour = 0x30D050 icn = "claude-mascot-ok-claude-usage"
       own = store.get("snddone") rtttl = "done:d=16,o=6,b=180:c,e,g,4c7"
     elif ev == "input"
-      title = "WARTET" colour = 0xFFA020 icn = "claude-mascot-warning-claude-usa"
+      title = self.word("txtask", "WAITING") colour = 0xFFA020 icn = "claude-mascot-warning-claude-usa"
       own = store.get("sndask") rtttl = "ask:d=8,o=6,b=200:e,p,e"
     else
       return
